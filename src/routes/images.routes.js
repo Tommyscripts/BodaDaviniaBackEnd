@@ -11,8 +11,10 @@ import { authMiddleware } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
+import { config } from "../config/config.js";
+
 const upload = multer({
-  dest: "uploads/",
+  dest: config.uploadDir,
 });
 
 router.post("/upload", upload.single("image"), uploadImage);
