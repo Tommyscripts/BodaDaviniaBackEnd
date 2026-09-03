@@ -4,6 +4,7 @@ import { config } from "../config/config.js";
 
 import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { v4 as uuidv4 } from "uuid";
+import crypto from "crypto";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v2 as cloudinary } from "cloudinary";
 import streamifier from "streamifier";
@@ -18,9 +19,12 @@ if (envConfig.cloudinaryCloudName && envConfig.cloudinaryApiKey && envConfig.clo
   });
 }
 
-const uploadToCloudinary = (buffer, folder) =>
+const uploadToCloudinary = (buffer, folder, publicId) =>
   new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream({ folder }, (err, result) => {
+    const opts = {};
+    if (folder) opts.folder = folder;
+    if (publicId) opts.public_id = publicId;
+    const stream = cloudinary.uploader.upload_stream(opts, (err, result) => {
       if (err) return reject(err);
       resolve(result);
     });
@@ -79,10 +83,19 @@ export const uploadImage = async (req, res) => {
     return res.status(400).json({ message: "No se ha enviado ninguna imagen" });
   }
 
-  // Cloudinary (if configured)
+  // compute deterministic id (prevent duplicates)
+  const fileHash = crypto.createHash("sha256").update(req.file.buffer).digest("hex").slice(0, 16);
+  const ext = path.extname(req.file.originalname || "") || "";
+  const safeBase = (req.file.originalname || "")
+    .replace(/\s+/g, "_")
+    .replace(/[^\w.\-]/g, "")
+    .slice(0, 50);
+
+  // Cloudinary (if configured) - use deterministic public_id
   if (envConfig.cloudinaryCloudName && cloudinary && req.file && req.file.buffer) {
     try {
-      const result = await uploadToCloudinary(req.file.buffer, envConfig.cloudinaryFolder || undefined);
+      const publicId = fileHash; // keep short hash as id
+      const result = await uploadToCloudinary(req.file.buffer, envConfig.cloudinaryFolder || undefined, publicId);
       return res.status(201).json({
         message: "Imagen subida correctamente",
         image: {
@@ -90,6 +103,7 @@ export const uploadImage = async (req, res) => {
           originalName: req.file.originalname,
           size: req.file.size,
           url: result.secure_url,
+          hash: fileHash,
         },
       });
     } catch (err) {
@@ -100,7 +114,7 @@ export const uploadImage = async (req, res) => {
 
   // Si S3 está configurado, subimos el buffer a S3
   if (config.s3Bucket && config.awsRegion) {
-    const key = `${Date.now()}_${uuidv4()}_${req.file.originalname}`;
+    const key = `${fileHash}${ext}`;
 
     const params = {
       Bucket: config.s3Bucket,
@@ -137,12 +151,27 @@ export const uploadImage = async (req, res) => {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
 
-  const filename = `${Date.now()}_${uuidv4()}_${req.file.originalname}`;
+  const filename = `${fileHash}${ext}`;
   const filepath = path.join(uploadsDir, filename);
 
   try {
+    if (fs.existsSync(filepath)) {
+      const base = `${req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http"}://${req.get("host")}`;
+      const url = `${base}/uploads/${encodeURIComponent(filename)}`;
+      return res.status(200).json({
+        message: "Imagen ya existe",
+        image: {
+          filename,
+          originalName: req.file.originalname,
+          size: fs.statSync(filepath).size,
+          url,
+          hash: fileHash,
+        },
+      });
+    }
+
     fs.writeFileSync(filepath, req.file.buffer);
-    const base = `${req.protocol}://${req.get("host")}`;
+    const base = `${req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http"}://${req.get("host")}`;
     const url = `${base}/uploads/${encodeURIComponent(filename)}`;
     return res.status(201).json({
       message: "Imagen subida correctamente",
@@ -151,6 +180,7 @@ export const uploadImage = async (req, res) => {
         originalName: req.file.originalname,
         size: req.file.size,
         url,
+        hash: fileHash,
       },
     });
   } catch (err) {
