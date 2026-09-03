@@ -15,6 +15,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/auth", authRoutes);
+app.use("/api", imagesRoutes);
 app.use("/api/images", imagesRoutes);
 
 app.get("/api/health", (req, res) => {
