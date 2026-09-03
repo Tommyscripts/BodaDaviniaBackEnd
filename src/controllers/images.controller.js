@@ -2,8 +2,9 @@ import fs from "fs";
 import path from "path";
 import { config } from "../config/config.js";
 
-import { S3Client, PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { v4 as uuidv4 } from "uuid";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const s3Client = new S3Client({ region: config.awsRegion });
 
@@ -102,11 +103,23 @@ export const uploadImage = (req, res) => {
   }
 };
 
-export const downloadImage = (req, res) => {
+export const downloadImage = async (req, res) => {
   const { filename } = req.params;
 
   if (!filename) {
     return res.status(400).json({ message: "No se ha especificado ninguna imagen" });
+  }
+
+  // S3 path: generate a presigned URL and redirect
+  if (config.s3Bucket && config.awsRegion) {
+    try {
+      const cmd = new GetObjectCommand({ Bucket: config.s3Bucket, Key: filename });
+      const url = await getSignedUrl(s3Client, cmd, { expiresIn: 60 });
+      return res.redirect(url);
+    } catch (err) {
+      console.error("Error obteniendo objeto S3:", err);
+      return res.status(500).json({ message: "Error obteniendo la imagen" });
+    }
   }
 
   const filePath = path.join(config.uploadDir, filename);
@@ -118,11 +131,22 @@ export const downloadImage = (req, res) => {
   return res.download(filePath);
 };
 
-export const deleteImage = (req, res) => {
+export const deleteImage = async (req, res) => {
   const { filename } = req.params;
 
   if (!filename) {
     return res.status(400).json({ message: "No se ha especificado ninguna imagen" });
+  }
+
+  // S3 deletion
+  if (config.s3Bucket && config.awsRegion) {
+    try {
+      await s3Client.send(new DeleteObjectCommand({ Bucket: config.s3Bucket, Key: filename }));
+      return res.status(200).json({ message: "Imagen eliminada correctamente", filename });
+    } catch (err) {
+      console.error("Error eliminando objeto S3:", err);
+      return res.status(500).json({ message: "Error al eliminar la imagen" });
+    }
   }
 
   const filePath = path.join(config.uploadDir, filename);
@@ -135,6 +159,7 @@ export const deleteImage = (req, res) => {
     fs.unlinkSync(filePath);
     return res.status(200).json({ message: "Imagen eliminada correctamente", filename });
   } catch (err) {
+    console.error("Error eliminando archivo local:", err);
     return res.status(500).json({ message: "Error al eliminar la imagen" });
   }
 };
