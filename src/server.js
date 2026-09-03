@@ -14,6 +14,11 @@ app.use(cors({ origin: config.frontendUrl }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Servir carpeta uploads estática cuando no se usa S3
+if (!config.s3Bucket) {
+  app.use("/uploads", express.static(config.uploadDir));
+}
+
 app.use("/api/auth", authRoutes);
 app.use("/api", imagesRoutes);
 app.use("/api/images", imagesRoutes);
@@ -28,6 +33,12 @@ app.use((err, req, res, next) => {
 });
 
 const start = async () => {
+  // Verificar que existe secreto JWT necesario para firmar tokens
+  if (!config.jwtSecret) {
+    console.error("JWT_SECRET no configurada. Define JWT_SECRET en las variables de entorno para habilitar autenticación.");
+    process.exit(1);
+  }
+
   if (config.mongoUri) {
     await connectDB();
     await ensureAdmin();

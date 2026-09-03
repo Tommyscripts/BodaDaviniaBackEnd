@@ -39,6 +39,9 @@ router.post(
   }
 );
 
+// Lista imágenes (público)
+router.get("/", listImages);
+
 router.get("/:filename/download", authMiddleware, downloadImage);
 
 router.delete("/:filename", authMiddleware, deleteImage);

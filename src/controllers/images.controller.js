@@ -2,10 +2,43 @@ import fs from "fs";
 import path from "path";
 import { config } from "../config/config.js";
 
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { v4 as uuidv4 } from "uuid";
 
 const s3Client = new S3Client({ region: config.awsRegion });
+
+export const listImages = async (req, res) => {
+  try {
+    if (config.s3Bucket && config.awsRegion) {
+      const params = { Bucket: config.s3Bucket };
+      const data = await s3Client.send(new ListObjectsV2Command(params));
+      const items = (data.Contents || []).map((obj) => ({
+        filename: obj.Key,
+        size: obj.Size,
+        lastModified: obj.LastModified,
+        url: `https://${config.s3Bucket}.s3.${config.awsRegion}.amazonaws.com/${encodeURIComponent(obj.Key)}`,
+      }));
+
+      return res.status(200).json({ images: items });
+    }
+
+    const uploadsDir = config.uploadDir;
+    if (!fs.existsSync(uploadsDir)) return res.status(200).json({ images: [] });
+
+    const files = fs.readdirSync(uploadsDir);
+    const items = files.map((filename) => {
+      const filepath = path.join(uploadsDir, filename);
+      const stat = fs.statSync(filepath);
+      const url = `${req.protocol}://${req.get("host")}/uploads/${encodeURIComponent(filename)}`;
+      return { filename, size: stat.size, lastModified: stat.mtime, url };
+    });
+
+    return res.status(200).json({ images: items });
+  } catch (err) {
+    console.error("Error listando imágenes:", err);
+    return res.status(500).json({ message: "Error listando imágenes" });
+  }
+};
 
 export const uploadImage = (req, res) => {
   if (!req.file) {
