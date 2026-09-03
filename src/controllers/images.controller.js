@@ -7,35 +7,33 @@ import { v4 as uuidv4 } from "uuid";
 
 const s3Client = new S3Client({ region: config.awsRegion });
 
-export const listImages = async (req, res) => {
+export const listImages = (req, res) => {
   try {
+    // If S3 is configured, list from S3 but adapt to the simple format
     if (config.s3Bucket && config.awsRegion) {
-      const params = { Bucket: config.s3Bucket };
-      const data = await s3Client.send(new ListObjectsV2Command(params));
-      const items = (data.Contents || []).map((obj) => ({
-        filename: obj.Key,
-        size: obj.Size,
-        lastModified: obj.LastModified,
-        url: `https://${config.s3Bucket}.s3.${config.awsRegion}.amazonaws.com/${encodeURIComponent(obj.Key)}`,
-      }));
-
-      return res.status(200).json({ images: items });
+      return s3Client
+        .send(new ListObjectsV2Command({ Bucket: config.s3Bucket }))
+        .then((data) => {
+          const items = (data.Contents || []).map((obj) => ({
+            id: obj.Key,
+            url: `https://${config.s3Bucket}.s3.${config.awsRegion}.amazonaws.com/${encodeURIComponent(obj.Key)}`,
+            alt: "",
+          }));
+          return res.json(items);
+        })
+        .catch((err) => {
+          console.error("listImages S3 error", err);
+          return res.status(500).json({ message: "Error listando imágenes" });
+        });
     }
 
-    const uploadsDir = config.uploadDir;
-    if (!fs.existsSync(uploadsDir)) return res.status(200).json({ images: [] });
-
-    const files = fs.readdirSync(uploadsDir);
-    const items = files.map((filename) => {
-      const filepath = path.join(uploadsDir, filename);
-      const stat = fs.statSync(filepath);
-      const url = `${req.protocol}://${req.get("host")}/uploads/${encodeURIComponent(filename)}`;
-      return { filename, size: stat.size, lastModified: stat.mtime, url };
-    });
-
-    return res.status(200).json({ images: items });
+    if (!fs.existsSync(config.uploadDir)) return res.json([]);
+    const files = fs.readdirSync(config.uploadDir).filter(Boolean);
+    const base = `${req.protocol}://${req.get("host")}`;
+    const images = files.map((f) => ({ id: f, url: `${base}/uploads/${encodeURIComponent(f)}`, alt: "" }));
+    return res.json(images);
   } catch (err) {
-    console.error("Error listando imágenes:", err);
+    console.error("listImages error", err);
     return res.status(500).json({ message: "Error listando imágenes" });
   }
 };

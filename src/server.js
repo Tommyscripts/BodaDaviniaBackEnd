@@ -10,14 +10,28 @@ import { ensureAdmin } from "./seed/createAdmin.js";
 
 const app = express();
 
-app.use(cors({ origin: config.frontendUrl }));
+// Allow multiple frontends via FRONTEND_URLS (comma-separated) or single FRONTEND_URL
+const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || config.frontendUrl || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true); // allow server-to-server and curl
+      if (allowedOrigins.length === 0) return callback(null, true); // open if none configured
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error("Not allowed by CORS"));
+    },
+  })
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Servir carpeta uploads estática cuando no se usa S3
-if (!config.s3Bucket) {
-  app.use("/uploads", express.static(config.uploadDir));
-}
+// servir la carpeta uploads públicamente
+app.use("/uploads", express.static(config.uploadDir));
 
 app.use("/api/auth", authRoutes);
 app.use("/api", imagesRoutes);
