@@ -60,7 +60,7 @@ export const listImages = (req, res) => {
   }
 };
 
-export const uploadImage = (req, res) => {
+export const uploadImage = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: "No se ha enviado ninguna imagen" });
   }
