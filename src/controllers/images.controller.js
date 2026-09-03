@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { config } from "../config/config.js";
 
-import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -124,24 +124,31 @@ export const uploadImage = async (req, res) => {
       ACL: "public-read",
     };
 
-    return s3Client
-      .send(new PutObjectCommand(params))
-      .then(() => {
-        const url = `https://${config.s3Bucket}.s3.${config.awsRegion}.amazonaws.com/${key}`;
-        return res.status(201).json({
-          message: "Imagen subida correctamente",
-          image: {
-            filename: key,
-            originalName: req.file.originalname,
-            size: req.file.size,
-            url,
-          },
-        });
-      })
-      .catch((err) => {
-        console.error("Error subiendo a S3:", err);
-        return res.status(500).json({ message: "Error subiendo la imagen a S3" });
+    // Check if object already exists to avoid duplicate uploads
+    try {
+      await s3Client.send(new HeadObjectCommand({ Bucket: config.s3Bucket, Key: key }));
+      const url = `https://${config.s3Bucket}.s3.${config.awsRegion}.amazonaws.com/${key}`;
+      return res.status(200).json({
+        message: "Imagen ya existe",
+        image: { filename: key, originalName: req.file.originalname, size: req.file.size, url },
       });
+    } catch (headErr) {
+      // if not found, upload; otherwise log and return error
+      const isNotFound = headErr && (headErr.name === "NotFound" || headErr.$metadata?.httpStatusCode === 404);
+      if (!isNotFound) {
+        console.error("S3 head object error", headErr);
+        return res.status(500).json({ message: "Error comprobando existencia en S3" });
+      }
+    }
+
+    try {
+      await s3Client.send(new PutObjectCommand(params));
+      const url = `https://${config.s3Bucket}.s3.${config.awsRegion}.amazonaws.com/${key}`;
+      return res.status(201).json({ message: "Imagen subida correctamente", image: { filename: key, originalName: req.file.originalname, size: req.file.size, url } });
+    } catch (err) {
+      console.error("Error subiendo a S3:", err);
+      return res.status(500).json({ message: "Error subiendo la imagen a S3" });
+    }
   }
 
   // Si no hay S3 configurado, guardamos localmente como antes.
@@ -232,6 +239,17 @@ export const deleteImage = async (req, res) => {
     } catch (err) {
       console.error("Error eliminando objeto S3:", err);
       return res.status(500).json({ message: "Error al eliminar la imagen" });
+    }
+  }
+
+  // Cloudinary deletion if configured and filename looks like a public_id
+  if (envConfig.cloudinaryCloudName && envConfig.cloudinaryApiKey && envConfig.cloudinaryApiSecret) {
+    try {
+      await cloudinary.uploader.destroy(filename);
+      return res.status(200).json({ message: "Imagen eliminada correctamente (cloudinary)", filename });
+    } catch (err) {
+      console.error("Error eliminando en Cloudinary:", err);
+      return res.status(500).json({ message: "Error al eliminar la imagen en Cloudinary" });
     }
   }
 
