@@ -31,6 +31,20 @@ const s3Client = new S3Client({ region: config.awsRegion });
 
 export const listImages = (req, res) => {
   try {
+    // Cloudinary listing (if configured)
+    if (envConfig.cloudinaryCloudName && envConfig.cloudinaryApiKey && envConfig.cloudinaryApiSecret) {
+      return cloudinary
+        .api
+        .resources({ type: "upload", prefix: envConfig.cloudinaryFolder || undefined, max_results: 500 })
+        .then((data) => {
+          const items = (data.resources || []).map((r) => ({ id: r.public_id, url: r.secure_url, alt: r.public_id }));
+          return res.json(items);
+        })
+        .catch((err) => {
+          console.error("listImages Cloudinary error", err);
+          // fallthrough to S3/local
+        });
+    }
     // If S3 is configured, list from S3 but adapt to the simple format
     if (config.s3Bucket && config.awsRegion) {
       return s3Client
@@ -128,13 +142,15 @@ export const uploadImage = async (req, res) => {
 
   try {
     fs.writeFileSync(filepath, req.file.buffer);
+    const base = `${req.protocol}://${req.get("host")}`;
+    const url = `${base}/uploads/${encodeURIComponent(filename)}`;
     return res.status(201).json({
       message: "Imagen subida correctamente",
       image: {
         filename,
         originalName: req.file.originalname,
         size: req.file.size,
-        path: filepath,
+        url,
       },
     });
   } catch (err) {
