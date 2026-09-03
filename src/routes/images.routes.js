@@ -47,4 +47,7 @@ router.get("/:filename/download", authMiddleware, downloadImage);
 
 router.delete("/:filename", authMiddleware, deleteImage);
 
+// Delete by public URL (normalizes to filename/public_id)
+router.post("/delete-by-url", authMiddleware, (req, res) => deleteImageByUrl(req, res));
+
 export default router;

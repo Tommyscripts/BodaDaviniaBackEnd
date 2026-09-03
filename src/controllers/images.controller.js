@@ -33,6 +33,30 @@ const uploadToCloudinary = (buffer, folder, publicId) =>
 
 const s3Client = new S3Client({ region: config.awsRegion });
 
+const normalizeFilename = (input, removeExtForCloudinary = false) => {
+  if (!input) return null;
+  let s = String(input);
+  try {
+    if (/^https?:\/\//i.test(s)) {
+      const u = new URL(s);
+      s = u.pathname;
+    }
+  } catch (e) {
+    // ignore
+  }
+  const parts = s.split("/").filter(Boolean);
+  let last = parts.length ? parts[parts.length - 1] : s;
+  // remove query
+  last = last.split("?")[0];
+  // remove fragment
+  last = last.split("#")[0];
+  if (removeExtForCloudinary) {
+    const idx = last.lastIndexOf('.');
+    if (idx > 0) last = last.substring(0, idx);
+  }
+  return decodeURIComponent(last);
+};
+
 export const listImages = (req, res) => {
   try {
     // Cloudinary listing (if configured)
@@ -69,7 +93,9 @@ export const listImages = (req, res) => {
 
     if (!fs.existsSync(config.uploadDir)) return res.json([]);
     const files = fs.readdirSync(config.uploadDir).filter(Boolean);
-    const base = `${req.protocol}://${req.get("host")}`;
+    const proto = req.get("x-forwarded-proto") || req.protocol;
+    const scheme = proto && proto.includes("https") ? "https" : "http";
+    const base = `${scheme}://${req.get("host")}`;
     const images = files.map((f) => ({ id: f, url: `${base}/uploads/${encodeURIComponent(f)}`, alt: "" }));
     return res.json(images);
   } catch (err) {
@@ -266,4 +292,18 @@ export const deleteImage = async (req, res) => {
     console.error("Error eliminando archivo local:", err);
     return res.status(500).json({ message: "Error al eliminar la imagen" });
   }
+};
+
+export const deleteImageByUrl = async (req, res) => {
+  const { url } = req.body || {};
+  if (!url) return res.status(400).json({ message: "Falta campo 'url' en body" });
+
+  const removeExt = !!(envConfig.cloudinaryCloudName && envConfig.cloudinaryApiKey && envConfig.cloudinaryApiSecret);
+  const normalized = normalizeFilename(url, removeExt);
+  if (!normalized) return res.status(400).json({ message: "No se pudo normalizar la url" });
+
+  // Reuse existing deleteImage logic by setting param
+  req.params = req.params || {};
+  req.params.filename = normalized;
+  return deleteImage(req, res);
 };
