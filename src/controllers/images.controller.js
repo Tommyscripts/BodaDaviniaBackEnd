@@ -5,6 +5,27 @@ import { config } from "../config/config.js";
 import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { v4 as uuidv4 } from "uuid";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { v2 as cloudinary } from "cloudinary";
+import streamifier from "streamifier";
+import { config as envConfig } from "../config/config.js";
+
+// Configure Cloudinary if env present
+if (envConfig.cloudinaryCloudName && envConfig.cloudinaryApiKey && envConfig.cloudinaryApiSecret) {
+  cloudinary.config({
+    cloud_name: envConfig.cloudinaryCloudName,
+    api_key: envConfig.cloudinaryApiKey,
+    api_secret: envConfig.cloudinaryApiSecret,
+  });
+}
+
+const uploadToCloudinary = (buffer, folder) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream({ folder }, (err, result) => {
+      if (err) return reject(err);
+      resolve(result);
+    });
+    streamifier.createReadStream(buffer).pipe(stream);
+  });
 
 const s3Client = new S3Client({ region: config.awsRegion });
 
@@ -42,6 +63,25 @@ export const listImages = (req, res) => {
 export const uploadImage = (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: "No se ha enviado ninguna imagen" });
+  }
+
+  // Cloudinary (if configured)
+  if (envConfig.cloudinaryCloudName && cloudinary && req.file && req.file.buffer) {
+    try {
+      const result = await uploadToCloudinary(req.file.buffer, envConfig.cloudinaryFolder || undefined);
+      return res.status(201).json({
+        message: "Imagen subida correctamente",
+        image: {
+          filename: result.public_id,
+          originalName: req.file.originalname,
+          size: req.file.size,
+          url: result.secure_url,
+        },
+      });
+    } catch (err) {
+      console.error("Error subiendo a Cloudinary:", err);
+      // fallthrough to try S3 or local
+    }
   }
 
   // Si S3 está configurado, subimos el buffer a S3

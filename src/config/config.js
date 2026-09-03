@@ -14,4 +14,9 @@ export const config = {
   // Opcional: configuración para subir a S3
   s3Bucket: process.env.S3_BUCKET || null,
   awsRegion: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || null,
+  // Cloudinary (opcional)
+  cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || null,
+  cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || null,
+  cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || null,
+  cloudinaryFolder: process.env.CLOUDINARY_FOLDER || "",
 };
