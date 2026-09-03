@@ -5,6 +5,7 @@ import {
   uploadImage,
   downloadImage,
   deleteImage,
+  listImages,
 } from "../controllers/images.controller.js";
 
 import { authMiddleware } from "../middleware/auth.middleware.js";
