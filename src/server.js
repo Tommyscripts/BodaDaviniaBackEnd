@@ -22,8 +22,16 @@ app.use(
       if (!origin) return callback(null, true); // allow server-to-server and curl
       if (allowedOrigins.length === 0) return callback(null, true); // open if none configured
       if (allowedOrigins.includes(origin)) return callback(null, true);
+      try {
+        const parsed = new URL(origin);
+        if (parsed.hostname && parsed.hostname.endsWith(".railway.app")) return callback(null, true);
+      } catch (e) {
+        // ignore invalid origin
+      }
       return callback(new Error("Not allowed by CORS"));
     },
+    credentials: true,
+    optionsSuccessStatus: 200,
   })
 );
 
@@ -43,6 +51,28 @@ app.get("/api/health", (req, res) => {
 
 app.use((err, req, res, next) => {
   console.error(err);
+  try {
+    const origin = req.get("origin");
+    if (origin) {
+      const allow =
+        allowedOrigins.length === 0 ||
+        allowedOrigins.includes(origin) ||
+        (() => {
+          try {
+            return new URL(origin).hostname.endsWith(".railway.app");
+          } catch (e) {
+            return false;
+          }
+        })();
+
+      if (allow) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Access-Control-Allow-Credentials", "true");
+      }
+    }
+  } catch (e) {
+    // ignore header-setting errors
+  }
   res.status(500).json({ message: "Error interno del servidor" });
 });
 
